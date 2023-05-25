@@ -1,55 +1,59 @@
 package webserver;
 
-import java.io.DataOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.Socket;
-
+import http.request.HttpRequest;
+import http.request.HttpRequestBuilder;
+import http.response.HttpResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import servlet.DispatcherServlet;
+
+import java.io.*;
+import java.lang.reflect.InvocationTargetException;
+import java.net.Socket;
 
 public class RequestHandler implements Runnable {
-    private static final Logger logger = LoggerFactory.getLogger(RequestHandler.class);
 
-    private Socket connection;
+	private static final Logger logger = LoggerFactory.getLogger(RequestHandler.class);
+	private static final DispatcherServlet dispatcherServlet = new DispatcherServlet();
 
-    public RequestHandler(Socket connectionSocket) {
-        this.connection = connectionSocket;
-    }
+	private final Socket connection;
 
-    public void run() {
-        logger.debug("New Client Connect! Connected IP : {}, Port : {}", connection.getInetAddress(),
-                connection.getPort());
+	public RequestHandler(Socket connectionSocket) {
+		this.connection = connectionSocket;
+	}
 
-        try (InputStream in = connection.getInputStream(); OutputStream out = connection.getOutputStream()) {
-            // TODO 사용자 요청에 대한 처리는 이 곳에 구현하면 된다.
-            DataOutputStream dos = new DataOutputStream(out);
-            byte[] body = "Hello World".getBytes();
-            response200Header(dos, body.length);
-            responseBody(dos, body);
-        } catch (IOException e) {
-            logger.error(e.getMessage());
-        }
-    }
+	public void run() {
+		logger.debug("New Client Connect! Connected IP : {}, Port : {}", connection.getInetAddress(),
+				connection.getPort());
 
-    private void response200Header(DataOutputStream dos, int lengthOfBodyContent) {
-        try {
-            dos.writeBytes("HTTP/1.1 200 OK \r\n");
-            dos.writeBytes("Content-Type: text/html;charset=utf-8\r\n");
-            dos.writeBytes("Content-Length: " + lengthOfBodyContent + "\r\n");
-            dos.writeBytes("\r\n");
-        } catch (IOException e) {
-            logger.error(e.getMessage());
-        }
-    }
+		try (BufferedReader br = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+		     OutputStream out = connection.getOutputStream()) {
+			HttpRequest httpRequest = HttpRequestBuilder.build(br);
+			HttpResponse httpResponse = new HttpResponse();
 
-    private void responseBody(DataOutputStream dos, byte[] body) {
-        try {
-            dos.write(body, 0, body.length);
-            dos.flush();
-        } catch (IOException e) {
-            logger.error(e.getMessage());
-        }
-    }
+			dispatcherServlet.dispatch(httpRequest, httpResponse);
+
+			logger.debug(httpRequest.toString());
+
+			DataOutputStream dos = new DataOutputStream(out);
+			response(dos, httpResponse);
+		} catch (IOException e) {
+			logger.error(e.getMessage());
+		} catch (InvocationTargetException | NoSuchMethodException | InstantiationException |
+		         IllegalAccessException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
+	private void response(DataOutputStream dos, HttpResponse httpResponse) {
+		try {
+			dos.writeBytes(httpResponse.getResponseLine().toString() + " \r\n");
+			dos.writeBytes(httpResponse.getHttpHeaders().toString() + " \r\n");
+			dos.writeBytes("\r\n");
+			dos.write(httpResponse.getBody(), 0, httpResponse.getBody().length);
+			dos.flush();
+		} catch (IOException e) {
+			logger.error(e.getMessage());
+		}
+	}
 }
